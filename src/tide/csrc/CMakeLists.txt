@@ -27,18 +27,10 @@ endif()
 add_library(Tide_OpenMP_Interface INTERFACE)
 set(OPENMP_CONFIGURED FALSE)
 
-if(WIN32)
-    find_package(OpenMP QUIET)
-    if(OpenMP_C_FOUND)
-        target_link_libraries(Tide_OpenMP_Interface INTERFACE OpenMP::OpenMP_C)
-        set(OPENMP_CONFIGURED TRUE)
-    endif()
-else()
-    find_package(OpenMP QUIET)
-    if(OpenMP_C_FOUND)
-        target_link_libraries(Tide_OpenMP_Interface INTERFACE OpenMP::OpenMP_C)
-        set(OPENMP_CONFIGURED TRUE)
-    endif()
+find_package(OpenMP QUIET)
+if(OpenMP_C_FOUND)
+    target_link_libraries(Tide_OpenMP_Interface INTERFACE OpenMP::OpenMP_C)
+    set(OPENMP_CONFIGURED TRUE)
 endif()
 
 if(OPENMP_CONFIGURED)
@@ -247,3 +239,10 @@ install(TARGETS tide_C
     ARCHIVE DESTINATION tide
     RUNTIME DESTINATION tide
 )
+
+if(WIN32)
+    set(TIDE_IOMP5_DLL "${CMAKE_CURRENT_SOURCE_DIR}/../libiomp5md.dll")
+    if(EXISTS "${TIDE_IOMP5_DLL}")
+        install(FILES "${TIDE_IOMP5_DLL}" DESTINATION tide)
+    endif()
+endif()

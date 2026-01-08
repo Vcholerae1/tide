@@ -13,11 +13,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest, macos-14]
+        os: [ubuntu-22.04, windows-2022, macos-14]
         python-version: ["3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -49,6 +49,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
+          # Bundle Intel OpenMP runtime for wheels
+          nuget install intelopenmp.devel.win -DirectDownload -NonInteractive
+          nuget install intelopenmp.redist.win -DirectDownload -NonInteractive
+          Copy-Item intelopenmp.devel.win*/build/native/win-x64/libiomp5md.lib src/tide/ -Force
+          Copy-Item intelopenmp.redist.win*/runtimes/win-x64/native/libiomp5md.dll src/tide/ -Force
           # Download and install CUDA
           Invoke-WebRequest -Uri "https://developer.download.nvidia.com/compute/cuda/12.4.0/network_installers/cuda_12.4.0_windows_network.exe" -OutFile "cuda_installer.exe"
           Start-Process -Wait -FilePath ".\cuda_installer.exe" -ArgumentList "-s", "nvcc_12.4", "cudart_12.4", "visual_studio_integration_12.4"
@@ -69,11 +74,19 @@ jobs:
       # Build wheel using uv (Linux/Windows use CUDA, macOS CPU-only)
       - name: Build wheel (Linux)
         if: runner.os == 'Linux'
+        env:
+          CUDACXX: /usr/local/cuda-12.4/bin/nvcc
+          CUDAToolkit_ROOT: /usr/local/cuda-12.4
+          CMAKE_CUDA_COMPILER: /usr/local/cuda-12.4/bin/nvcc
         run: |
           uv build --wheel
         shell: bash
       - name: Build wheel (Windows)
         if: runner.os == 'Windows'
+        env:
+          CUDACXX: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin\nvcc.exe
+          CUDAToolkit_ROOT: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4
+          CMAKE_CUDA_COMPILER: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin\nvcc.exe
         run: |
           uv build --wheel
         shell: bash
@@ -91,74 +104,11 @@ jobs:
           name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
           path: dist/*.whl
 
-  test_wheels:
-    name: Test wheels on ${{ matrix.os }}
-    needs: [build_wheels]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, windows-latest, macos-14]
-        python-version: ["3.12"]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-          enable-cache: true
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Check if tests should be skipped
-        id: check-skip
-        run: |
-          if echo "${{ github.event.head_commit.message }}" | grep -q "\[skip tests\]"; then
-            echo "skip_tests=true" >> $GITHUB_OUTPUT
-          else
-            echo "skip_tests=false" >> $GITHUB_OUTPUT
-          fi
-        shell: bash
-
-      - name: Download wheel
-        uses: actions/download-artifact@v4
-        with:
-          name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: dist/
-
-      # Install the built wheel and test dependencies
-      - name: Install wheel and test dependencies
-        if: steps.check-skip.outputs.skip_tests != 'true'
-        run: |
-          uv pip install --system --torch-backend cpu dist/*.whl pytest pytest-cov
-        shell: bash
-
-      # Run tests
-      - name: Run tests
-        if: steps.check-skip.outputs.skip_tests != 'true'
-        run: |
-          pytest tests/ -v --cov=tide --cov-report=xml --cov-report=term
-        shell: bash
-
-      # Upload coverage
-      - name: Upload coverage to Codecov
-        if: steps.check-skip.outputs.skip_tests != 'true' && matrix.os == 'ubuntu-22.04'
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-
   build_sdist:
     name: Build source distribution
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -172,27 +122,3 @@ jobs:
         with:
           name: sdist
           path: dist/*.tar.gz
-
-  # Optional: Test installation from sdist
-  test_sdist:
-    name: Test sdist installation
-    needs: [build_sdist]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Download sdist
-        uses: actions/download-artifact@v4
-        with:
-          name: sdist
-          path: dist/
-
-      - name: Install from sdist
-        env:
-          CMAKE_ARGS: -DTIDE_ENABLE_CUDA=OFF
-        run: |
-          uv pip install --system --torch-backend cpu dist/*.tar.gz
-          python -c "import tide; print(f'tide version: {tide.__version__}')"

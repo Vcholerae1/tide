@@ -130,10 +130,8 @@ static void convert_grad_ca_cb_to_eps_sigma(
   int64_t const out_shots = ca_batched ? n_shots : 1;
   TIDE_DTYPE const inv_dt = (TIDE_DTYPE)1 / dt;
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(3)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < out_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE3
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < out_shots; ++shot_idx) {
     for (int64_t y = 0; y < ny; ++y) {
       for (int64_t x = 0; x < nx; ++x) {
         int64_t const out_idx = ca_batched ? IDX_SHOT(shot_idx, y, x) : IDX(y, x);
@@ -175,10 +173,8 @@ static void add_sources_ey(
     int64_t const shot_numel,
     int64_t const n_sources_per_shot) {
   
-#ifdef _OPENMP
-#pragma omp parallel for collapse(2)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE2
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t source_idx = 0; source_idx < n_sources_per_shot; ++source_idx) {
       int64_t k = shot_idx * n_sources_per_shot + source_idx;
       if (sources_i[k] >= 0) {
@@ -196,10 +192,8 @@ static void subtract_sources_ey(
     int64_t const shot_numel,
     int64_t const n_sources_per_shot) {
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(2)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE2
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t source_idx = 0; source_idx < n_sources_per_shot; ++source_idx) {
       int64_t k = shot_idx * n_sources_per_shot + source_idx;
       if (sources_i[k] >= 0) {
@@ -218,10 +212,8 @@ static void record_receivers_ey(
     int64_t const shot_numel,
     int64_t const n_receivers_per_shot) {
   
-#ifdef _OPENMP
-#pragma omp parallel for collapse(2)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE2
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t receiver_idx = 0; receiver_idx < n_receivers_per_shot; ++receiver_idx) {
       int64_t k = shot_idx * n_receivers_per_shot + receiver_idx;
       if (receivers_i[k] >= 0) {
@@ -243,10 +235,8 @@ static void gather_boundary_3_cpu(
     int64_t const n_shots,
     int64_t const shot_numel) {
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(2)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE2
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t bi = 0; bi < boundary_numel; ++bi) {
       int64_t const grid_idx = boundary_indices[bi];
       int64_t const field_offset = shot_idx * shot_numel + grid_idx;
@@ -266,10 +256,8 @@ static void scatter_boundary_cpu(
     int64_t const n_shots,
     int64_t const shot_numel) {
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(2)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE2
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t bi = 0; bi < boundary_numel; ++bi) {
       int64_t const grid_idx = boundary_indices[bi];
       int64_t const field_offset = shot_idx * shot_numel + grid_idx;
@@ -289,10 +277,8 @@ static void scatter_boundary_2_cpu(
     int64_t const n_shots,
     int64_t const shot_numel) {
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(2)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE2
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t bi = 0; bi < boundary_numel; ++bi) {
       int64_t const grid_idx = boundary_indices[bi];
       int64_t const field_offset = shot_idx * shot_numel + grid_idx;
@@ -315,10 +301,8 @@ static void gather_boundary_3_cpu_bf16(
     int64_t const n_shots,
     int64_t const shot_numel) {
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(2)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE2
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t bi = 0; bi < boundary_numel; ++bi) {
       int64_t const grid_idx = boundary_indices[bi];
       int64_t const field_offset = shot_idx * shot_numel + grid_idx;
@@ -338,10 +322,8 @@ static void scatter_boundary_cpu_bf16(
     int64_t const n_shots,
     int64_t const shot_numel) {
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(2)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE2
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t bi = 0; bi < boundary_numel; ++bi) {
       int64_t const grid_idx = boundary_indices[bi];
       int64_t const field_offset = shot_idx * shot_numel + grid_idx;
@@ -361,10 +343,8 @@ static void scatter_boundary_2_cpu_bf16(
     int64_t const n_shots,
     int64_t const shot_numel) {
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(2)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE2
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t bi = 0; bi < boundary_numel; ++bi) {
       int64_t const grid_idx = boundary_indices[bi];
       int64_t const field_offset = shot_idx * shot_numel + grid_idx;
@@ -430,10 +410,8 @@ static void forward_kernel_h(
   int64_t const pml_x0h = pml_x0;
   int64_t const pml_x1h = MAX(pml_x0, pml_x1 - 1);
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(3)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE3
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t y = FD_PAD; y < ny - FD_PAD + 1; ++y) {
       for (int64_t x = FD_PAD; x < nx - FD_PAD + 1; ++x) {
         TIDE_DTYPE const cq_val = CQ(0, 0);
@@ -515,10 +493,8 @@ static void forward_kernel_e_with_storage(
     TIDE_DTYPE *const ey_store,
     TIDE_DTYPE *const curl_h_store) {
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(3)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE3
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t y = FD_PAD; y < ny - FD_PAD + 1; ++y) {
       for (int64_t x = FD_PAD; x < nx - FD_PAD + 1; ++x) {
         TIDE_DTYPE const ca_val = CA(0, 0);
@@ -599,10 +575,8 @@ static void forward_kernel_e_with_storage_bf16(
     tide_bfloat16 *const ey_store,
     tide_bfloat16 *const curl_h_store) {
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(3)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE3
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t y = FD_PAD; y < ny - FD_PAD + 1; ++y) {
       for (int64_t x = FD_PAD; x < nx - FD_PAD + 1; ++x) {
         TIDE_DTYPE const ca_val = CA(0, 0);
@@ -1202,10 +1176,8 @@ static void backward_kernel_lambda_h(
   int64_t const pml_x0h = pml_x0;
   int64_t const pml_x1h = MAX(pml_x0, pml_x1 - 1);
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(3)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE3
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t y = FD_PAD; y < ny - FD_PAD + 1; ++y) {
       for (int64_t x = FD_PAD; x < nx - FD_PAD + 1; ++x) {
         TIDE_DTYPE const cb_val = CB(0, 0);
@@ -1306,10 +1278,8 @@ static void backward_kernel_lambda_e_with_grad(
   int64_t const pml_bounds_y[] = {FD_PAD, pml_y0, pml_y1, ny - FD_PAD + 1};
   int64_t const pml_bounds_x[] = {FD_PAD, pml_x0, pml_x1, nx - FD_PAD + 1};
 
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     // Loop over 3x3 grid of regions
     for (int pml_y = 0; pml_y < 3; ++pml_y) {
       for (int pml_x = 0; pml_x < 3; ++pml_x) {
@@ -1422,10 +1392,8 @@ static void backward_kernel_lambda_e_with_grad_bf16(
   int64_t const pml_bounds_y[] = {FD_PAD, pml_y0, pml_y1, ny - FD_PAD + 1};
   int64_t const pml_bounds_x[] = {FD_PAD, pml_x0, pml_x1, nx - FD_PAD + 1};
 
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int pml_y = 0; pml_y < 3; ++pml_y) {
       for (int pml_x = 0; pml_x < 3; ++pml_x) {
         for (int64_t y = pml_bounds_y[pml_y]; y < pml_bounds_y[pml_y + 1]; ++y) {
@@ -1504,10 +1472,8 @@ static void inverse_kernel_e_and_curl(
     bool const ca_batched,
     bool const cb_batched) {
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(3)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE3
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t y = FD_PAD; y < ny - FD_PAD + 1; ++y) {
       for (int64_t x = FD_PAD; x < nx - FD_PAD + 1; ++x) {
         bool pml_y = y < pml_y0 || y >= pml_y1;
@@ -1548,10 +1514,8 @@ static void inverse_kernel_h(
     int64_t const pml_x1,
     bool const cq_batched) {
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(3)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE3
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t y = FD_PAD; y < ny - FD_PAD + 1; ++y) {
       for (int64_t x = FD_PAD; x < nx - FD_PAD + 1; ++x) {
         bool pml_y = y < pml_y0 || y >= pml_y1;

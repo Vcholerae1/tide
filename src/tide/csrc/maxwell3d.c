@@ -66,10 +66,8 @@ static void add_sources_field(
     int64_t const n_shots,
     int64_t const shot_numel,
     int64_t const n_sources_per_shot) {
-#ifdef _OPENMP
-#pragma omp parallel for collapse(2)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE2
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t source_idx = 0; source_idx < n_sources_per_shot; ++source_idx) {
       int64_t k = shot_idx * n_sources_per_shot + source_idx;
       if (sources_i[k] >= 0) {
@@ -87,10 +85,8 @@ static void record_receivers_field(
     int64_t const n_shots,
     int64_t const shot_numel,
     int64_t const n_receivers_per_shot) {
-#ifdef _OPENMP
-#pragma omp parallel for collapse(2)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE2
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t receiver_idx = 0; receiver_idx < n_receivers_per_shot; ++receiver_idx) {
       int64_t k = shot_idx * n_receivers_per_shot + receiver_idx;
       if (receivers_i[k] >= 0) {
@@ -156,10 +152,8 @@ static void forward_kernel_h_3d(
   int64_t const pml_x0h = pml_x0;
   int64_t const pml_x1h = MAX(pml_x0, pml_x1 - 1);
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(4)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE4
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t z = FD_PAD; z < nz - FD_PAD + 1; ++z) {
       for (int64_t y = FD_PAD; y < ny - FD_PAD + 1; ++y) {
         for (int64_t x = FD_PAD; x < nx - FD_PAD + 1; ++x) {
@@ -266,10 +260,8 @@ static void forward_kernel_e_3d(
     bool const ca_batched,
     bool const cb_batched) {
 
-#ifdef _OPENMP
-#pragma omp parallel for collapse(4)
-#endif
-  for (int64_t shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
+TIDE_OMP_PARALLEL_FOR_COLLAPSE4
+  for (TIDE_OMP_INDEX shot_idx = 0; shot_idx < n_shots; ++shot_idx) {
     for (int64_t z = FD_PAD; z < nz - FD_PAD + 1; ++z) {
       for (int64_t y = FD_PAD; y < ny - FD_PAD + 1; ++y) {
         for (int64_t x = FD_PAD; x < nx - FD_PAD + 1; ++x) {
