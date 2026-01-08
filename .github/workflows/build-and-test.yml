@@ -30,16 +30,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Check if tests should be skipped
-        id: check-skip
-        run: |
-          if echo "${{ github.event.head_commit.message }}" | grep -q "\[skip tests\]"; then
-            echo "skip_tests=true" >> $GITHUB_OUTPUT
-          else
-            echo "skip_tests=false" >> $GITHUB_OUTPUT
-          fi
-        shell: bash
-
       # Linux: Install CUDA
       - name: Install CUDA (Linux)
         if: runner.os == 'Linux'
@@ -78,12 +68,57 @@ jobs:
           uv build --wheel
         shell: bash
 
+      # Upload wheels
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: dist/*.whl
+
+  test_wheels:
+    name: Test wheels on ${{ matrix.os }}
+    needs: [build_wheels]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-13, macos-14]
+        python-version: ["3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Check if tests should be skipped
+        id: check-skip
+        run: |
+          if echo "${{ github.event.head_commit.message }}" | grep -q "\[skip tests\]"; then
+            echo "skip_tests=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip_tests=false" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: Download wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: dist/
+
       # Install the built wheel and test dependencies
       - name: Install wheel and test dependencies
         if: steps.check-skip.outputs.skip_tests != 'true'
         run: |
-          uv pip install --system dist/*.whl
-          uv pip install --system pytest pytest-cov
+          uv pip install --system --torch-backend cpu dist/*.whl pytest pytest-cov
         shell: bash
 
       # Run tests
@@ -95,18 +130,12 @@ jobs:
 
       # Upload coverage
       - name: Upload coverage to Codecov
-        if: steps.check-skip.outputs.skip_tests != 'true' && matrix.os == 'ubuntu-latest'
+        if: steps.check-skip.outputs.skip_tests != 'true' && matrix.os == 'ubuntu-22.04'
         uses: codecov/codecov-action@v4
         with:
           file: ./coverage.xml
           flags: unittests
           name: codecov-umbrella
-
-      # Upload wheels
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: dist/*.whl
 
   build_sdist:
     name: Build source distribution
@@ -146,5 +175,5 @@ jobs:
 
       - name: Install from sdist
         run: |
-          uv pip install --system dist/*.tar.gz
+          uv pip install --system --torch-backend cpu dist/*.tar.gz
           python -c "import tide; print(f'tide version: {tide.__version__}')"
