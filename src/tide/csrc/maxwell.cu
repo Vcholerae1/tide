@@ -2,9 +2,8 @@
  * Maxwell wave equation propagator (CUDA implementation) 
  * 
  * This file contains the CUDA implementation of the 2D TM Maxwell equations
- * propagator with complete Adjoint State Method (ASM) support for gradient
- * computation.
- *
+ * propagator with complete Adjoint State Method (ASM) support for gradient computation.
+ * 
  * TM mode fields: Ey (electric), Hx, Hz (magnetic)
  *
  * EXACT DISCRETE Adjoint State Method for Maxwell TM equations:
@@ -203,17 +202,6 @@ __global__ void record_adjoint_at_sources(TIDE_DTYPE *__restrict const grad_f,
   }
 }
 
-#if TIDE_DTYPE_FLOAT
-__global__ void convert_f32_to_bf16(__nv_bfloat16 *__restrict const out,
-                                    TIDE_DTYPE const *__restrict const in,
-                                    int64_t const n) {
-  int64_t idx = (int64_t)blockIdx.x * (int64_t)blockDim.x +
-                (int64_t)threadIdx.x;
-  if (idx < n) {
-    out[idx] = __float2bfloat16((float)in[idx]);
-  }
-}
-#endif
 
 // FP8 E4M3 (1 sign, 4 exponent, 3 mantissa) encode/decode.
 __device__ __forceinline__ uint8_t fp8_e4m3_from_float(float x) {

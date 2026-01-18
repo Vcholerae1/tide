@@ -31,7 +31,8 @@ compile_commands.json
 outputs/
 benchmark_history/
 
-# Development notes (optional - remove if you want to track these)
+# Development notes 
+.vscode/
 benchmarks.md
 check.md
 
@@ -41,3 +42,5 @@ check.md
 *.png
 *.html
 !README.md
+
+deepwave/

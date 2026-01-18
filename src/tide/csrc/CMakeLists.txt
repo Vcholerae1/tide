@@ -23,7 +23,7 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
 endif()
 
-# --- OpenMP Configuration ---
+# --- OpenMP Configuration (aligned with deepwave) ---
 add_library(Tide_OpenMP_Interface INTERFACE)
 set(OPENMP_CONFIGURED FALSE)
 
@@ -31,12 +31,9 @@ find_package(OpenMP QUIET)
 if(OpenMP_C_FOUND)
     target_link_libraries(Tide_OpenMP_Interface INTERFACE OpenMP::OpenMP_C)
     set(OPENMP_CONFIGURED TRUE)
-endif()
-
-if(OPENMP_CONFIGURED)
     message(STATUS "OpenMP enabled.")
 else()
-    message(STATUS "OpenMP not found or not configured.")
+    message(STATUS "OpenMP not found.")
 endif()
 
 # --- Compiler Feature Detection and Flags ---
@@ -70,7 +67,7 @@ else()
     message(STATUS "AVX2 is not supported.")
 endif()
 
-# Release flags
+# Release flags (aligned with deepwave)
 if(CMAKE_BUILD_TYPE MATCHES Release)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|Intel")
         set(C_RELEASE_FLAGS "-Ofast")

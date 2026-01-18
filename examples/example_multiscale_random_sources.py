@@ -25,7 +25,8 @@ air_layer = 3
 n_shots = 100
 d_source = 4
 first_source = 0
-n_batch = 7
+# Shots per batch (batch size).
+batch_size = 8
 random_source_batches = True
 random_seed = 7
 model_gradient_sampling_interval = 5
@@ -59,7 +60,7 @@ receiver_locations = torch.zeros(n_shots, 1, 2, dtype=torch.long, device=device)
 receiver_locations[:, 0, 0] = source_depth
 receiver_locations[:, 0, 1] = source_x + 1
 
-n_shots_per_batch = (n_shots + n_batch - 1) // n_batch
+n_shots_per_batch = batch_size
 shot_rng = torch.Generator()
 shot_rng.manual_seed(random_seed)
 
@@ -71,8 +72,8 @@ filter_specs = {
 }
 inversion_schedule = [
     {"data_key": "lp250", "adamw_epochs": 40},
-    {"data_key": "lp500", "adamw_epochs": 30},
-    {"data_key": "lp700", "adamw_epochs": 10},
+    {"data_key": "lp500", "adamw_epochs": 0},
+    {"data_key": "lp700", "adamw_epochs": 0},
 ]
 
 print(f"Base forward frequency: {base_forward_freq/1e6:.0f} MHz")
@@ -86,7 +87,7 @@ print(f"Random source selection: {random_source_batches}, seed {random_seed}")
 
 lowpass_tag = "-".join(str(spec["lowpass_mhz"]) for spec in filter_specs.values())
 output_dir = Path("outputs") / (
-    f"multiscale_fir_randomsrc_base{int(base_forward_freq/1e6)}MHz_lp{lowpass_tag}_shots{n_shots}_nb{n_batch}_nt{nt}"
+    f"multiscale_fir_randomsrc_base{int(base_forward_freq/1e6)}MHz_lp{lowpass_tag}_shots{n_shots}_bs{batch_size}_nt{nt}"
 )
 output_dir.mkdir(parents=True, exist_ok=True)
 print(f"Saving figures to: {output_dir}")
@@ -236,7 +237,7 @@ def forward_shots(epsilon, sigma, mu, shot_indices, source_amplitude_full, requi
         storage_mode=storage_mode,
         storage_compression=storage_compression,
     )
-    return out[-1]  # [nt, n_batch_shots, 1]
+    return out[-1]  # [nt, shots_in_batch, 1]
 
 
 def generate_base_and_filtered_observed():

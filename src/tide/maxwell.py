@@ -31,6 +31,7 @@ C0 = 1.0 / math.sqrt(EP0 * MU0)  # speed of light in vacuum (m/s)
 
 _CTX_HANDLE_COUNTER = itertools.count()
 _CTX_HANDLE_REGISTRY: dict[int, dict[str, Any]] = {}
+_CPU_STORAGE_BUFFERS = 3  # Keep in sync with csrc NUM_BUFFERS for CPU staging.
 
 
 def _register_ctx_handle(ctx_data: dict[str, Any]) -> torch.Tensor:
@@ -93,10 +94,7 @@ def _resolve_storage_compression(
             raise NotImplementedError(
                 f"{context} (FP8 storage) is not supported in this path."
             )
-        if device.type != "cuda":
-            raise NotImplementedError(
-                f"{context} (FP8 storage) is only supported on CUDA."
-            )
+        # FP8 now supported on both CUDA and CPU
         if dtype != torch.float32:
             raise NotImplementedError(
                 f"{context} (FP8 storage) is only supported for float32."
@@ -2126,9 +2124,14 @@ class MaxwellTMForwardFunc(torch.autograd.Function):
                             dtype=store_dtype,
                         )
                     elif storage_mode == STORAGE_CPU:
-                        # Double-buffer device staging to overlap D2H copies.
+                        # Multi-buffer device staging to overlap D2H copies.
                         store_1 = torch.empty(
-                            2, n_shots, ny, nx, device=device, dtype=store_dtype
+                            _CPU_STORAGE_BUFFERS,
+                            n_shots,
+                            ny,
+                            nx,
+                            device=device,
+                            dtype=store_dtype,
                         )
                         store_3 = torch.empty(
                             num_steps_stored,
@@ -2967,7 +2970,13 @@ class Maxwell3DForwardFunc(torch.autograd.Function):
                         )
                     elif storage_mode == STORAGE_CPU:
                         store_1 = torch.empty(
-                            2, n_shots, nz, ny, nx, device=device, dtype=store_dtype
+                            _CPU_STORAGE_BUFFERS,
+                            n_shots,
+                            nz,
+                            ny,
+                            nx,
+                            device=device,
+                            dtype=store_dtype,
                         )
                         store_3 = torch.empty(
                             num_steps_stored,
@@ -5498,9 +5507,13 @@ class MaxwellTMForwardBoundaryFunc(torch.autograd.Function):
                     dtype=store_dtype,
                 )
             elif storage_mode == STORAGE_CPU:
-                # Double-buffer device staging to enable safe async copies.
+                # Multi-buffer device staging to enable safe async copies.
                 store_1 = torch.empty(
-                    2, n_shots, boundary_numel, device=device, dtype=store_dtype
+                    _CPU_STORAGE_BUFFERS,
+                    n_shots,
+                    boundary_numel,
+                    device=device,
+                    dtype=store_dtype,
                 )
                 store_3 = torch.empty(
                     num_steps_stored,

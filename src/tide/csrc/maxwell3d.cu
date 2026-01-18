@@ -10,10 +10,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda_bf16.h>
+#include <cooperative_groups.h>
 
 #include "common_gpu.h"
 #include "storage_utils.h"
 #include "staggered_grid_3d.h"
+
+namespace cg = cooperative_groups;
 
 // CPU storage pipelining: Number of ping-pong buffers for async D2H/H2D copies
 #ifndef NUM_BUFFERS
@@ -2432,11 +2435,262 @@ __global__ void convert_grad_ca_cb_to_eps_sigma_3d(
   }
 }
 
+/*
+ * Fused H+E forward kernel using cooperative groups for grid-level synchronization.
+ * This reduces kernel launch overhead by combining H and E updates in a single kernel.
+ *
+ * Benefits:
+ * - Eliminates kernel launch overhead between H and E updates
+ * - Better GPU utilization for small grids
+ * - Maintains correct gradient storage for backward pass
+ *
+ * Requirements:
+ * - GPU must support cooperative launch (compute capability >= 6.0)
+ * - Grid size must fit in available SMs for cooperative launch
+ */
+__global__ void __launch_bounds__(256) forward_kernel_fused_3d(
+    // Material parameters
+    TIDE_DTYPE const *__restrict const ca,
+    TIDE_DTYPE const *__restrict const cb,
+    TIDE_DTYPE const *__restrict const cq,
+    // Field arrays (read/write)
+    TIDE_DTYPE *__restrict const ex,
+    TIDE_DTYPE *__restrict const ey,
+    TIDE_DTYPE *__restrict const ez,
+    TIDE_DTYPE *__restrict const hx,
+    TIDE_DTYPE *__restrict const hy,
+    TIDE_DTYPE *__restrict const hz,
+    // PML memory variables for H update (E-derived)
+    TIDE_DTYPE *__restrict const m_ey_z,
+    TIDE_DTYPE *__restrict const m_ez_y,
+    TIDE_DTYPE *__restrict const m_ez_x,
+    TIDE_DTYPE *__restrict const m_ex_z,
+    TIDE_DTYPE *__restrict const m_ex_y,
+    TIDE_DTYPE *__restrict const m_ey_x,
+    // PML memory variables for E update (H-derived)
+    TIDE_DTYPE *__restrict const m_hz_y,
+    TIDE_DTYPE *__restrict const m_hy_z,
+    TIDE_DTYPE *__restrict const m_hx_z,
+    TIDE_DTYPE *__restrict const m_hz_x,
+    TIDE_DTYPE *__restrict const m_hy_x,
+    TIDE_DTYPE *__restrict const m_hx_y,
+    // Gradient storage arrays (optional)
+    TIDE_DTYPE *__restrict const ex_store,
+    TIDE_DTYPE *__restrict const ey_store,
+    TIDE_DTYPE *__restrict const ez_store,
+    TIDE_DTYPE *__restrict const curlx_store,
+    TIDE_DTYPE *__restrict const curly_store,
+    TIDE_DTYPE *__restrict const curlz_store,
+    // PML coefficients
+    TIDE_DTYPE const *__restrict const az,
+    TIDE_DTYPE const *__restrict const bz,
+    TIDE_DTYPE const *__restrict const azh,
+    TIDE_DTYPE const *__restrict const bzh,
+    TIDE_DTYPE const *__restrict const ay,
+    TIDE_DTYPE const *__restrict const by,
+    TIDE_DTYPE const *__restrict const ayh,
+    TIDE_DTYPE const *__restrict const byh,
+    TIDE_DTYPE const *__restrict const ax,
+    TIDE_DTYPE const *__restrict const bx,
+    TIDE_DTYPE const *__restrict const axh,
+    TIDE_DTYPE const *__restrict const bxh,
+    TIDE_DTYPE const *__restrict const kz,
+    TIDE_DTYPE const *__restrict const kzh,
+    TIDE_DTYPE const *__restrict const ky,
+    TIDE_DTYPE const *__restrict const kyh,
+    TIDE_DTYPE const *__restrict const kx,
+    TIDE_DTYPE const *__restrict const kxh,
+    // Grid parameters
+    TIDE_DTYPE const rdz,
+    TIDE_DTYPE const rdy,
+    TIDE_DTYPE const rdx,
+    int64_t const n_shots,
+    int64_t const nz,
+    int64_t const ny,
+    int64_t const nx,
+    int64_t const shot_numel,
+    // PML boundaries
+    int64_t const pml_z0,
+    int64_t const pml_z1,
+    int64_t const pml_y0,
+    int64_t const pml_y1,
+    int64_t const pml_x0,
+    int64_t const pml_x1,
+    // Flags
+    bool const ca_batched,
+    bool const cb_batched,
+    bool const cq_batched,
+    bool const store_e,
+    bool const store_curl) {
+
+  cg::grid_group grid = cg::this_grid();
+
+  int64_t const shot_idx = (int64_t)blockIdx.z;
+  int64_t const x = (int64_t)blockIdx.x * (int64_t)blockDim.x +
+                    (int64_t)threadIdx.x + FD_PAD;
+  int64_t const y = (int64_t)blockIdx.y * (int64_t)blockDim.y +
+                    (int64_t)threadIdx.y + FD_PAD;
+
+  if (shot_idx >= n_shots) return;
+  if (x >= nx - FD_PAD + 1 || y >= ny - FD_PAD + 1) return;
+
+  int64_t const pml_z0h = pml_z0;
+  int64_t const pml_z1h = MAX(pml_z0, pml_z1 - 1);
+  int64_t const pml_y0h = pml_y0;
+  int64_t const pml_y1h = MAX(pml_y0, pml_y1 - 1);
+  int64_t const pml_x0h = pml_x0;
+  int64_t const pml_x1h = MAX(pml_x0, pml_x1 - 1);
+
+  bool const pml_y_h = y < pml_y0h || y >= pml_y1h;
+  bool const pml_x_h = x < pml_x0h || x >= pml_x1h;
+  bool const pml_y_e = y < pml_y0 || y >= pml_y1;
+  bool const pml_x_e = x < pml_x0 || x >= pml_x1;
+
+  // ========== Phase 1: Update H field ==========
+  for (int64_t z = FD_PAD; z < nz - FD_PAD + 1; ++z) {
+    bool const pml_z_h = z < pml_z0h || z >= pml_z1h;
+    TIDE_DTYPE const cq_val = CQ(0, 0, 0);
+
+    // Update Hx: dEy/dz - dEz/dy
+    if (z < nz - FD_PAD && y < ny - FD_PAD) {
+      TIDE_DTYPE dEy_dz = DIFFZH1(EY);
+      if (pml_z_h) {
+        M_EY_Z(0, 0, 0) = bzh[z] * M_EY_Z(0, 0, 0) + azh[z] * dEy_dz;
+        dEy_dz = dEy_dz / kzh[z] + M_EY_Z(0, 0, 0);
+      }
+      TIDE_DTYPE dEz_dy = DIFFYH1(EZ);
+      if (pml_y_h) {
+        M_EZ_Y(0, 0, 0) = byh[y] * M_EZ_Y(0, 0, 0) + ayh[y] * dEz_dy;
+        dEz_dy = dEz_dy / kyh[y] + M_EZ_Y(0, 0, 0);
+      }
+      HX(0, 0, 0) -= cq_val * (dEy_dz - dEz_dy);
+    }
+
+    // Update Hy: dEz/dx - dEx/dz
+    if (z < nz - FD_PAD && x < nx - FD_PAD) {
+      TIDE_DTYPE dEz_dx = DIFFXH1(EZ);
+      if (pml_x_h) {
+        M_EZ_X(0, 0, 0) = bxh[x] * M_EZ_X(0, 0, 0) + axh[x] * dEz_dx;
+        dEz_dx = dEz_dx / kxh[x] + M_EZ_X(0, 0, 0);
+      }
+      TIDE_DTYPE dEx_dz = DIFFZH1(EX);
+      if (pml_z_h) {
+        M_EX_Z(0, 0, 0) = bzh[z] * M_EX_Z(0, 0, 0) + azh[z] * dEx_dz;
+        dEx_dz = dEx_dz / kzh[z] + M_EX_Z(0, 0, 0);
+      }
+      HY(0, 0, 0) -= cq_val * (dEz_dx - dEx_dz);
+    }
+
+    // Update Hz: dEx/dy - dEy/dx
+    if (y < ny - FD_PAD && x < nx - FD_PAD) {
+      TIDE_DTYPE dEx_dy = DIFFYH1(EX);
+      if (pml_y_h) {
+        M_EX_Y(0, 0, 0) = byh[y] * M_EX_Y(0, 0, 0) + ayh[y] * dEx_dy;
+        dEx_dy = dEx_dy / kyh[y] + M_EX_Y(0, 0, 0);
+      }
+      TIDE_DTYPE dEy_dx = DIFFXH1(EY);
+      if (pml_x_h) {
+        M_EY_X(0, 0, 0) = bxh[x] * M_EY_X(0, 0, 0) + axh[x] * dEy_dx;
+        dEy_dx = dEy_dx / kxh[x] + M_EY_X(0, 0, 0);
+      }
+      HZ(0, 0, 0) -= cq_val * (dEx_dy - dEy_dx);
+    }
+  }
+
+  // ========== Global Synchronization ==========
+  // Wait for all blocks to complete H update before starting E update
+  grid.sync();
+
+  // ========== Phase 2: Update E field (with optional gradient storage) ==========
+  for (int64_t z = FD_PAD; z < nz - FD_PAD + 1; ++z) {
+    bool const pml_z_e = z < pml_z0 || z >= pml_z1;
+    int64_t const j = z * ny * nx + y * nx + x;
+    int64_t const i = shot_idx * shot_numel + j;
+
+    TIDE_DTYPE const ca_val = CA(0, 0, 0);
+    TIDE_DTYPE const cb_val = CB(0, 0, 0);
+
+    // Compute curl(H)
+    TIDE_DTYPE dHz_dy = DIFFY1(HZ);
+    if (pml_y_e) {
+      M_HZ_Y(0, 0, 0) = by[y] * M_HZ_Y(0, 0, 0) + ay[y] * dHz_dy;
+      dHz_dy = dHz_dy / ky[y] + M_HZ_Y(0, 0, 0);
+    }
+    TIDE_DTYPE dHy_dz = DIFFZ1(HY);
+    if (pml_z_e) {
+      M_HY_Z(0, 0, 0) = bz[z] * M_HY_Z(0, 0, 0) + az[z] * dHy_dz;
+      dHy_dz = dHy_dz / kz[z] + M_HY_Z(0, 0, 0);
+    }
+    TIDE_DTYPE curl_x = dHz_dy - dHy_dz;
+
+    TIDE_DTYPE dHx_dz = DIFFZ1(HX);
+    if (pml_z_e) {
+      M_HX_Z(0, 0, 0) = bz[z] * M_HX_Z(0, 0, 0) + az[z] * dHx_dz;
+      dHx_dz = dHx_dz / kz[z] + M_HX_Z(0, 0, 0);
+    }
+    TIDE_DTYPE dHz_dx = DIFFX1(HZ);
+    if (pml_x_e) {
+      M_HZ_X(0, 0, 0) = bx[x] * M_HZ_X(0, 0, 0) + ax[x] * dHz_dx;
+      dHz_dx = dHz_dx / kx[x] + M_HZ_X(0, 0, 0);
+    }
+    TIDE_DTYPE curl_y = dHx_dz - dHz_dx;
+
+    TIDE_DTYPE dHy_dx = DIFFX1(HY);
+    if (pml_x_e) {
+      M_HY_X(0, 0, 0) = bx[x] * M_HY_X(0, 0, 0) + ax[x] * dHy_dx;
+      dHy_dx = dHy_dx / kx[x] + M_HY_X(0, 0, 0);
+    }
+    TIDE_DTYPE dHx_dy = DIFFY1(HX);
+    if (pml_y_e) {
+      M_HX_Y(0, 0, 0) = by[y] * M_HX_Y(0, 0, 0) + ay[y] * dHx_dy;
+      dHx_dy = dHx_dy / ky[y] + M_HX_Y(0, 0, 0);
+    }
+    TIDE_DTYPE curl_z = dHy_dx - dHx_dy;
+
+    // Load old E values for gradient storage
+    TIDE_DTYPE ex_old = ex[i];
+    TIDE_DTYPE ey_old = ey[i];
+    TIDE_DTYPE ez_old = ez[i];
+
+    // Store snapshots for gradient computation (before E update)
+    if (store_e && ex_store != nullptr) ex_store[i] = ex_old;
+    if (store_e && ey_store != nullptr) ey_store[i] = ey_old;
+    if (store_e && ez_store != nullptr) ez_store[i] = ez_old;
+    if (store_curl && curlx_store != nullptr) curlx_store[i] = curl_x;
+    if (store_curl && curly_store != nullptr) curly_store[i] = curl_y;
+    if (store_curl && curlz_store != nullptr) curlz_store[i] = curl_z;
+
+    // Update E field: E_new = ca * E_old + cb * curl(H)
+    ex[i] = ca_val * ex_old + cb_val * curl_x;
+    ey[i] = ca_val * ey_old + cb_val * curl_y;
+    ez[i] = ca_val * ez_old + cb_val * curl_z;
+  }
+}
+
 }  // namespace
 
+// Check if cooperative launch is supported (must be outside anonymous namespace)
+static bool check_cooperative_launch_support(int device) {
+  int supportsCoopLaunch = 0;
+  cudaDeviceGetAttribute(&supportsCoopLaunch, cudaDevAttrCooperativeLaunch, device);
+  return supportsCoopLaunch != 0;
+}
+
+// Block configuration for optimal performance
+// Default: 32x8=256 threads - optimal for most grid sizes
+// Environment variable TIDE_BLOCK_X and TIDE_BLOCK_Y can override for tuning
 static void get_block_xy(int *bx, int *by) {
+  // Default block size: 32x8 = 256 threads
+  // This provides good balance for typical grid sizes (128³ - 256³)
+  // For very large grids (512³+), consider TIDE_BLOCK_X=32 TIDE_BLOCK_Y=16
   *bx = 32;
   *by = 8;
+
+  // Allow runtime override via environment variables for tuning
+  const char* env_bx = getenv("TIDE_BLOCK_X");
+  const char* env_by = getenv("TIDE_BLOCK_Y");
+  if (env_bx) *bx = atoi(env_bx);
+  if (env_by) *by = atoi(env_by);
 }
 
 /*
@@ -2568,8 +2822,88 @@ void FUNC(forward)(
 
   bool const use_naive = false;
 
+  // Check if fused kernel should be used (controlled by environment variable)
+  // TIDE_FUSED_KERNEL=1 enables the fused cooperative kernel
+  bool use_fused = false;
+  const char* env_fused = getenv("TIDE_FUSED_KERNEL");
+  if (env_fused && atoi(env_fused) == 1) {
+    int current_device;
+    cudaGetDevice(&current_device);
+    if (check_cooperative_launch_support(current_device)) {
+      // Check if grid size is compatible with cooperative launch
+      int numBlocksPerSm = 0;
+      cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+          &numBlocksPerSm, forward_kernel_fused_3d, block_x * block_y, 0);
+      int numSMs;
+      cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, current_device);
+      int maxBlocks = numBlocksPerSm * numSMs;
+      int totalBlocks = dimGrid.x * dimGrid.y * dimGrid.z;
+      use_fused = (totalBlocks <= maxBlocks);
+      // Debug output (uncomment if needed)
+      // if (use_fused) {
+      //   fprintf(stderr, "TIDE: Using fused kernel (%d blocks, max %d)\n", totalBlocks, maxBlocks);
+      // } else {
+      //   fprintf(stderr, "TIDE: Fused kernel disabled - grid too large (%d blocks > %d max)\n",
+      //           totalBlocks, maxBlocks);
+      // }
+    }
+  }
+
+  // Prepare null pointers for store arrays (needed for cooperative kernel args)
+  TIDE_DTYPE *null_store = nullptr;
+  bool store_e_val = false;
+  bool store_curl_val = false;
+
   for (int64_t t = start_t; t < start_t + nt; ++t) {
-    if (use_naive) {
+    if (use_fused) {
+      // Use fused cooperative kernel (H + E in single launch)
+      // Total: 64 parameters
+      void *kernelArgs[] = {
+        // 0-2: Material parameters
+        (void*)&ca, (void*)&cb, (void*)&cq,
+        // 3-8: Field arrays
+        (void*)&ex, (void*)&ey, (void*)&ez,
+        (void*)&hx, (void*)&hy, (void*)&hz,
+        // 9-14: PML memory for H update (E-derived)
+        (void*)&m_ey_z, (void*)&m_ez_y, (void*)&m_ez_x,
+        (void*)&m_ex_z, (void*)&m_ex_y, (void*)&m_ey_x,
+        // 15-20: PML memory for E update (H-derived)
+        (void*)&m_hz_y, (void*)&m_hy_z, (void*)&m_hx_z,
+        (void*)&m_hz_x, (void*)&m_hy_x, (void*)&m_hx_y,
+        // 21-26: Gradient storage (nullptr for forward-only)
+        (void*)&null_store, (void*)&null_store, (void*)&null_store,
+        (void*)&null_store, (void*)&null_store, (void*)&null_store,
+        // 27-44: PML coefficients (18 total)
+        (void*)&az, (void*)&bz, (void*)&azh, (void*)&bzh,
+        (void*)&ay, (void*)&by, (void*)&ayh, (void*)&byh,
+        (void*)&ax, (void*)&bx, (void*)&axh, (void*)&bxh,
+        (void*)&kz, (void*)&kzh, (void*)&ky, (void*)&kyh,
+        (void*)&kx, (void*)&kxh,
+        // 45-47: Grid spacing reciprocals
+        (void*)&rdz, (void*)&rdy, (void*)&rdx,
+        // 48-52: Grid dimensions
+        (void*)&n_shots, (void*)&nz, (void*)&ny, (void*)&nx, (void*)&shot_numel,
+        // 53-58: PML boundaries
+        (void*)&pml_z0, (void*)&pml_z1, (void*)&pml_y0, (void*)&pml_y1,
+        (void*)&pml_x0, (void*)&pml_x1,
+        // 59-61: Batched flags
+        (void*)&ca_batched, (void*)&cb_batched, (void*)&cq_batched,
+        // 62-63: Store flags
+        (void*)&store_e_val, (void*)&store_curl_val
+      };
+
+      cudaError_t err = cudaLaunchCooperativeKernel(
+        (void*)forward_kernel_fused_3d,
+        dimGrid, dimBlock,
+        kernelArgs,
+        0,  // shared memory
+        0   // stream
+      );
+      if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA cooperative launch error: %s\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+      }
+    } else if (use_naive) {
       forward_kernel_h_3d_naive<<<dimGrid, dimBlock>>>(
           cq, ex, ey, ez, hx, hy, hz,
           m_ey_z, m_ez_y, m_ez_x, m_ex_z, m_ex_y, m_ey_x,
@@ -2579,6 +2913,18 @@ void FUNC(forward)(
           n_shots, nz, ny, nx, shot_numel,
           pml_z0, pml_z1, pml_y0, pml_y1, pml_x0, pml_x1,
           cq_batched);
+      CHECK_KERNEL_ERROR;
+
+      forward_kernel_e_3d_naive<<<dimGrid, dimBlock>>>(
+          ca, cb, hx, hy, hz, ex, ey, ez,
+          m_hz_y, m_hy_z, m_hx_z, m_hz_x, m_hy_x, m_hx_y,
+          az, bz, azh, bzh, ay, by, ayh, byh, ax, bx, axh, bxh,
+          kz, kzh, ky, kyh, kx, kxh,
+          rdz, rdy, rdx,
+          n_shots, nz, ny, nx, shot_numel,
+          pml_z0, pml_z1, pml_y0, pml_y1, pml_x0, pml_x1,
+          ca_batched, cb_batched);
+      CHECK_KERNEL_ERROR;
     } else {
       forward_kernel_h_3d<<<dimGrid, dimBlock, shared_bytes>>>(
           cq, ex, ey, ez, hx, hy, hz,
@@ -2589,20 +2935,8 @@ void FUNC(forward)(
           n_shots, nz, ny, nx, shot_numel,
           pml_z0, pml_z1, pml_y0, pml_y1, pml_x0, pml_x1,
           cq_batched);
-    }
-    CHECK_KERNEL_ERROR;
+      CHECK_KERNEL_ERROR;
 
-    if (use_naive) {
-      forward_kernel_e_3d_naive<<<dimGrid, dimBlock>>>(
-          ca, cb, hx, hy, hz, ex, ey, ez,
-          m_hz_y, m_hy_z, m_hx_z, m_hz_x, m_hy_x, m_hx_y,
-          az, bz, azh, bzh, ay, by, ayh, byh, ax, bx, axh, bxh,
-          kz, kzh, ky, kyh, kx, kxh,
-          rdz, rdy, rdx,
-          n_shots, nz, ny, nx, shot_numel,
-          pml_z0, pml_z1, pml_y0, pml_y1, pml_x0, pml_x1,
-          ca_batched, cb_batched);
-    } else {
       forward_kernel_e_3d<<<dimGrid, dimBlock, shared_bytes>>>(
           ca, cb, hx, hy, hz, ex, ey, ez,
           m_hz_y, m_hy_z, m_hx_z, m_hz_x, m_hy_x, m_hx_y,
@@ -2612,8 +2946,8 @@ void FUNC(forward)(
           n_shots, nz, ny, nx, shot_numel,
           pml_z0, pml_z1, pml_y0, pml_y1, pml_x0, pml_x1,
           ca_batched, cb_batched);
+      CHECK_KERNEL_ERROR;
     }
-    CHECK_KERNEL_ERROR;
 
     if (n_sources_per_shot > 0) {
       add_sources_field<<<dimGrid_sources, dimBlock_sources>>>(
@@ -3516,6 +3850,7 @@ void FUNC(backward)(
         m_lambda_ey_z, m_lambda_ez_y, m_lambda_ez_x,
         m_lambda_ex_z, m_lambda_ex_y, m_lambda_ey_x,
         az, bz, azh, bzh, ay, by, ayh, byh, ax, bx, axh, bxh,
+      
         kz, kzh, ky, kyh, kx, kxh,
         rdz, rdy, rdx,
         n_shots, nz, ny, nx, shot_numel,

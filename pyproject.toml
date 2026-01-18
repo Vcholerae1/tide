@@ -65,8 +65,39 @@ cmake.source-dir = "src/tide/csrc"
 cmake.build-type = "Release"
 wheel.packages = ["src/tide"]
 wheel.install-dir = "tide"
+wheel.py-api = "py3"
 build-dir = "build/{wheel_tag}"
 ninja.make-fallback = true
+
+[tool.cibuildwheel]
+# Build for Python 3.12 only (python-independent wheel)
+build = "cp312-*"
+skip = ["*musllinux*"]
+
+# Use manylinux_2_28 for better glibc and compiler support
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+
+build-verbosity = 1
+archs = ["auto64"]
+
+# Test configuration  
+test-requires = "pytest numpy scipy torch"
+
+[tool.cibuildwheel.linux]
+# Install GCC 13 for better OpenMP SIMD support
+before-all = "dnf install -y gcc-toolset-13"
+environment = { PATH="/opt/rh/gcc-toolset-13/root/usr/bin:$PATH", CC="gcc", CXX="g++" }
+test-command = "pytest {project}/tests"
+# Don't bundle CUDA libraries
+repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel} --exclude libcuda.so.1 --exclude 'libcudart.so.*'"
+before-test = "pip install torch --index-url https://download.pytorch.org/whl/cpu"
+
+[tool.cibuildwheel.windows]
+test-command = "pytest {project}/tests"
+
+[tool.cibuildwheel.macos]
+test-command = "pytest {project}/tests"
 
 [dependency-groups]
 dev = [

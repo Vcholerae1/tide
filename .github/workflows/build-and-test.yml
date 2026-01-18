@@ -14,95 +14,63 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, windows-2022, macos-14]
-        python-version: ["3.12"]
 
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-          enable-cache: true
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      # Linux: Install CUDA
-      - name: Install CUDA (Linux)
-        if: runner.os == 'Linux'
+      - name: Check if tests should be skipped
+        id: check-skip
         run: |
-          # Install CUDA toolkit
-          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
-          sudo dpkg -i cuda-keyring_1.1-1_all.deb
-          sudo apt-get update
-          sudo apt-get -y install cuda-toolkit-12-4
-          echo "CUDA_PATH=/usr/local/cuda-12.4" >> $GITHUB_ENV
-          echo "CUDA_HOME=/usr/local/cuda-12.4" >> $GITHUB_ENV
-          echo "LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-          echo "/usr/local/cuda-12.4/bin" >> $GITHUB_PATH
-
-      # Windows: Install CUDA
-      - name: Install CUDA (Windows)
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          # Bundle Intel OpenMP runtime for wheels
-          nuget install intelopenmp.devel.win -DirectDownload -NonInteractive
-          nuget install intelopenmp.redist.win -DirectDownload -NonInteractive
-          Copy-Item intelopenmp.devel.win*/build/native/win-x64/libiomp5md.lib src/tide/ -Force
-          Copy-Item intelopenmp.redist.win*/runtimes/win-x64/native/libiomp5md.dll src/tide/ -Force
-          # Download and install CUDA
-          Invoke-WebRequest -Uri "https://developer.download.nvidia.com/compute/cuda/12.4.0/network_installers/cuda_12.4.0_windows_network.exe" -OutFile "cuda_installer.exe"
-          Start-Process -Wait -FilePath ".\cuda_installer.exe" -ArgumentList "-s", "nvcc_12.4", "cudart_12.4", "visual_studio_integration_12.4"
-          $cudaPath = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4"
-          "CUDA_PATH=$cudaPath" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "CUDA_HOME=$cudaPath" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "CUDA_PATH_V12_4=$cudaPath" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "CudaToolkitDir=$cudaPath" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "CUDAToolkit_ROOT=$cudaPath" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "$cudaPath\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-
-      # macOS: No CUDA, CPU only
-      - name: Setup macOS
-        if: runner.os == 'macOS'
-        run: |
-          echo "Building CPU-only version for macOS"
-
-      # Build wheel using uv (Linux/Windows use CUDA, macOS CPU-only)
-      - name: Build wheel (Linux)
-        if: runner.os == 'Linux'
-        env:
-          CUDACXX: /usr/local/cuda-12.4/bin/nvcc
-          CUDAToolkit_ROOT: /usr/local/cuda-12.4
-          CMAKE_CUDA_COMPILER: /usr/local/cuda-12.4/bin/nvcc
-        run: |
-          uv build --wheel
-        shell: bash
-      - name: Build wheel (Windows)
-        if: runner.os == 'Windows'
-        env:
-          CUDACXX: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin\nvcc.exe
-          CUDAToolkit_ROOT: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4
-          CMAKE_CUDA_COMPILER: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin\nvcc.exe
-        run: |
-          uv build --wheel
-        shell: bash
-      - name: Build wheel (macOS CPU-only)
-        if: runner.os == 'macOS'
-        env:
-          CMAKE_ARGS: -DTIDE_ENABLE_CUDA=OFF
-        run: |
-          uv build --wheel
+          if echo "${{ github.event.head_commit.message }}" | grep -q "\[skip tests\]"; then
+            echo "skip_tests=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip_tests=false" >> $GITHUB_OUTPUT
+          fi
         shell: bash
 
-      # Upload wheels
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.21.3
+        env:
+          # Use uv as build frontend for faster builds
+          CIBW_BUILD_FRONTEND: "build[uv]"
+          
+          # Linux: Install CUDA and GCC 13
+          CIBW_BEFORE_ALL_LINUX: >
+            curl -sL https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo -o /etc/yum.repos.d/cuda-rhel8.repo && 
+            dnf install -y cuda-nvcc-12-4 cuda-cudart-devel-12-4 gcc-toolset-13
+          CIBW_ENVIRONMENT_LINUX: >
+            PATH="/opt/rh/gcc-toolset-13/root/usr/bin/:$PATH:/usr/local/cuda-12.4/bin" 
+            CUDA_PATH="/usr/local/cuda-12.4" 
+            CUDA_HOME="/usr/local/cuda-12.4" 
+            LD_LIBRARY_PATH="/opt/rh/gcc-toolset-13/root/usr/lib64:$LD_LIBRARY_PATH:/usr/local/cuda-12.4/lib64" 
+            CUDACXX="/usr/local/cuda-12.4/bin/nvcc" 
+            CC=/opt/rh/gcc-toolset-13/root/usr/bin/gcc 
+            CXX=/opt/rh/gcc-toolset-13/root/usr/bin/g++ 
+            CMAKE_CUDA_HOST_COMPILER=/opt/rh/gcc-toolset-13/root/usr/bin/g++
+          
+          # Windows: Install CUDA and Intel OpenMP
+          CIBW_BEFORE_ALL_WINDOWS: >
+            nuget install intelopenmp.devel.win -DirectDownload -NonInteractive &&
+            nuget install intelopenmp.redist.win -DirectDownload -NonInteractive &&
+            cp intelopenmp.devel.win*/build/native/win-x64/libiomp5md.lib src/tide/ &&
+            cp intelopenmp.redist.win*/runtimes/win-x64/native/libiomp5md.dll src/tide/ &&
+            curl https://developer.download.nvidia.com/compute/cuda/12.4.0/network_installers/cuda_12.4.0_windows_network.exe -o cuda_installer.exe &&
+            cuda_installer.exe -s nvcc_12.4 cudart_12.4 visual_studio_integration_12.4
+          CIBW_ENVIRONMENT_WINDOWS: >
+            PATH="$PATH;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4\\bin" 
+            CudaToolkitDir="C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4" 
+            CUDA_PATH="C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4" 
+            CUDACXX="C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4\\bin\\nvcc.exe"
+          
+          # macOS: CPU-only build  
+          CIBW_ENVIRONMENT_MACOS: CMAKE_ARGS="-DTIDE_ENABLE_CUDA=OFF"
+          
+          CIBW_TEST_SKIP: ${{ steps.check-skip.outputs.skip_tests == 'true' && '*' || '' }}
+
       - uses: actions/upload-artifact@v4
         with:
-          name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: dist/*.whl
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
 
   build_sdist:
     name: Build source distribution
