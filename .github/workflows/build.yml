@@ -33,7 +33,7 @@ jobs:
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
           CIBW_BEFORE_ALL_LINUX: >
             curl -sL https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo -o /etc/yum.repos.d/cuda-rhel8.repo && 
-            dnf install -y cuda-nvcc-12-4 cuda-cudart-devel-12-4 gcc-toolset-13
+            yum install -y cuda-nvcc-12-4 cuda-cudart-devel-12-4 gcc-toolset-13
           CIBW_ENVIRONMENT_LINUX: >
             PATH="/opt/rh/gcc-toolset-13/root/usr/bin/:$PATH:/usr/local/cuda-12.4/bin" 
             CUDA_PATH="/usr/local/cuda-12.4" 
