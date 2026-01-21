@@ -1,5 +1,5 @@
 [project]
-name = "tide"
+name = "tide-GPR"
 version = "0.0.2"
 description = "Torch-based Inversion & Development Engine for electromagnetic wave propagation"
 readme = "README.md"
