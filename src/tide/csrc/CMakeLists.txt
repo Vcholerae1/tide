@@ -100,6 +100,10 @@ macro(add_tide_cpu_object_library BASENAME ACCURACY DTYPE)
     if(HAVE_AVX2 AND C_AVX2_FLAG)
         target_compile_options(${TARGET_NAME} PRIVATE ${C_AVX2_FLAG})
     endif()
+
+    if(MSVC)
+        target_compile_options(${TARGET_NAME} PRIVATE /openmp:experimental)
+    endif()
 endmacro()
 
 if(CUDAToolkit_FOUND)
