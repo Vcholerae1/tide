@@ -65,7 +65,7 @@ jobs:
             CMAKE_CUDA_HOST_COMPILER=/opt/rh/gcc-toolset-13/root/usr/bin/g++
             CMAKE_ARGS="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache"
           
-          # Windows: Install CUDA and Intel OpenMP (only if not cached)
+          # Windows: Install CUDA and use Clang-cl for C/C++ compilation
           CIBW_BEFORE_ALL_WINDOWS: >
             if not exist "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin\nvcc.exe" (
               echo "Installing CUDA..." &&
@@ -74,16 +74,16 @@ jobs:
             ) else (
               echo "Using cached CUDA installation"
             ) &&
-            nuget install intelopenmp.devel.win -DirectDownload -NonInteractive &&
-            nuget install intelopenmp.redist.win -DirectDownload -NonInteractive &&
-            cp intelopenmp.devel.win*/build/native/win-x64/libiomp5md.lib src/tide/ &&
-            cp intelopenmp.redist.win*/runtimes/win-x64/native/libiomp5md.dll src/tide/
+            choco install llvm -y &&
+            cp "C:\Program Files\LLVM\bin\libomp.dll" src/tide/
           CIBW_ENVIRONMENT_WINDOWS: >
-            PATH="$PATH;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4\\bin;C:\\ProgramData\\chocolatey\\lib\\ccache\\tools" 
+            PATH="$PATH;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4\\bin;C:\\Program Files\\LLVM\\bin" 
             CudaToolkitDir="C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4" 
             CUDA_PATH="C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4" 
             CUDACXX="C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4\\bin\\nvcc.exe"
-            CMAKE_ARGS="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache"
+            CC="clang-cl"
+            CXX="clang-cl"
+            CMAKE_ARGS="-DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -T ClangCL"
           
           # macOS: CPU-only build  
           CIBW_ENVIRONMENT_MACOS: CMAKE_ARGS="-DTIDE_ENABLE_CUDA=OFF"

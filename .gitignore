@@ -35,6 +35,7 @@ benchmark_history/
 .vscode/
 benchmarks.md
 check.md
+test.md
 
 # Generated images/media (examples output)
 *.gif
@@ -42,3 +43,4 @@ check.md
 *.png
 *.html
 !README.md
+

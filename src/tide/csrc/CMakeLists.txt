@@ -48,9 +48,11 @@ set(AVX2_TEST_CODE "
     }")
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|Intel")
-    set(C_AVX2_FLAG "-mavx2")
-elseif(CMAKE_C_COMPILER_ID MATCHES "MSVC")
-    set(C_AVX2_FLAG "/arch:AVX2")
+    if(WIN32)
+        set(C_AVX2_FLAG "/arch:AVX2")  # Clang-cl uses MSVC-style flags
+    else()
+        set(C_AVX2_FLAG "-mavx2")
+    endif()
 endif()
 
 if(C_AVX2_FLAG)
@@ -70,10 +72,13 @@ endif()
 # Release flags (aligned with deepwave)
 if(CMAKE_BUILD_TYPE MATCHES Release)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|Intel")
-        set(C_RELEASE_FLAGS "-Ofast")
-        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Ofast")
-    elseif(CMAKE_C_COMPILER_ID MATCHES "MSVC")
-        set(C_RELEASE_FLAGS "/O2" "/fp:fast")
+        if(WIN32)
+            # Clang-cl on Windows uses MSVC-style flags
+            set(C_RELEASE_FLAGS "/O2" "/fp:fast")
+        else()
+            set(C_RELEASE_FLAGS "-Ofast")
+            set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Ofast")
+        endif()
     endif()
 endif()
 
@@ -99,10 +104,6 @@ macro(add_tide_cpu_object_library BASENAME ACCURACY DTYPE)
 
     if(HAVE_AVX2 AND C_AVX2_FLAG)
         target_compile_options(${TARGET_NAME} PRIVATE ${C_AVX2_FLAG})
-    endif()
-
-    if(MSVC)
-        target_compile_options(${TARGET_NAME} PRIVATE /openmp:experimental)
     endif()
 endmacro()
 
@@ -239,9 +240,10 @@ install(TARGETS tide_C
     RUNTIME DESTINATION tide
 )
 
+# Bundle OpenMP runtime on Windows (Clang's libomp.dll)
 if(WIN32)
-    set(TIDE_IOMP5_DLL "${CMAKE_CURRENT_SOURCE_DIR}/../libiomp5md.dll")
-    if(EXISTS "${TIDE_IOMP5_DLL}")
-        install(FILES "${TIDE_IOMP5_DLL}" DESTINATION tide)
+    set(TIDE_LIBOMP_DLL "${CMAKE_CURRENT_SOURCE_DIR}/../libomp.dll")
+    if(EXISTS "${TIDE_LIBOMP_DLL}")
+        install(FILES "${TIDE_LIBOMP_DLL}" DESTINATION tide)
     endif()
 endif()
