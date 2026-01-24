@@ -63,7 +63,6 @@ jobs:
             CC=/opt/rh/gcc-toolset-13/root/usr/bin/gcc 
             CXX=/opt/rh/gcc-toolset-13/root/usr/bin/g++ 
             CMAKE_CUDA_HOST_COMPILER=/opt/rh/gcc-toolset-13/root/usr/bin/g++
-            CMAKE_ARGS="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache"
           
           # Windows: Install CUDA and use Clang-cl for C/C++ compilation
           CIBW_BEFORE_ALL_WINDOWS: >
