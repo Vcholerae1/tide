@@ -64,7 +64,7 @@ jobs:
             CXX=/opt/rh/gcc-toolset-13/root/usr/bin/g++ 
             CMAKE_CUDA_HOST_COMPILER=/opt/rh/gcc-toolset-13/root/usr/bin/g++
           
-          # Windows: Install CUDA and use Clang-cl for C/C++ compilation
+          # Windows: Install CUDA and use Clang for C/C++ compilation
           CIBW_BEFORE_ALL_WINDOWS: >
             if not exist "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin\nvcc.exe" (
               echo "Installing CUDA..." &&
@@ -73,16 +73,16 @@ jobs:
             ) else (
               echo "Using cached CUDA installation"
             ) &&
-            choco install llvm -y &&
+            choco install llvm ninja -y &&
             cp "C:\Program Files\LLVM\bin\libomp.dll" src/tide/
           CIBW_ENVIRONMENT_WINDOWS: >
-            PATH="$PATH;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4\\bin;C:\\Program Files\\LLVM\\bin" 
+            PATH="C:\\Program Files\\LLVM\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4\\bin;$PATH"
             CudaToolkitDir="C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4" 
             CUDA_PATH="C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4" 
-            CUDACXX="C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4\\bin\\nvcc.exe"
-            CC="clang-cl"
-            CXX="clang-cl"
-            CMAKE_ARGS="-DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -T ClangCL"
+            CC="C:\\Program Files\\LLVM\\bin\\clang-cl.exe"
+            CXX="C:\\Program Files\\LLVM\\bin\\clang-cl.exe"
+            CMAKE_GENERATOR="Ninja"
+            CMAKE_ARGS="-DCUDAToolkit_ROOT=C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.4 -DOpenMP_ROOT=C:/Program Files/LLVM"
           
           # macOS: CPU-only build  
           CIBW_ENVIRONMENT_MACOS: CMAKE_ARGS="-DTIDE_ENABLE_CUDA=OFF"
