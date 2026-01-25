@@ -21,6 +21,15 @@ TIDE is a PyTorch-based library for  high frequa electromagnetic wave propagatio
 
 ### From PyPI
 
+Ensure you have proper PyTorch installation with CUDA binding for your system.
+
+Maybe you need 
+```bash
+uv pip install torch --index-url https://download.pytorch.org/whl/cu128
+``` 
+cu128 is for CUDA 12.8, change it according to your CUDA version.
+
+Then install TIDE via uv or pip:
 
 ```bash
 uv pip install tide-GPR
@@ -31,6 +40,7 @@ or
 ```bash
 pip install tide-GPR
 ```
+
 
 ### From Source
 
@@ -102,7 +112,7 @@ See the [`examples/`](examples/) directory for complete workflows:
 
 - [`example_multiscale_filtered.py`](examples/example_multiscale_filtered.py): Multi-scale FWI with frequency filtering
 - [`example_multiscale_random_sources.py`](examples/example_multiscale_random_sources.py): FWI with random source encoding
-- [`wavefield_animation.py`](examples/examples/wavefield_animation.py): Visualize wave propagation
+- [`example_wavefield_animation.py`](examples/example_wavefield_animation.py): Visualize wave propagation
 
 ## Documentation
 
